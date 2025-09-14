@@ -1,0 +1,11 @@
+# SECURITY CRITICAL: Never commit this file with real values!
+PORT=3001
+NODE_ENV=production
+FRONTEND_URL=http://localhost:3000
+ETHEREUM_RPC_URL=https://eth-mainnet.g.alchemy.com/v2/YOUR_ALCHEMY_API_KEY
+ARBITRUM_RPC_URL=https://arb-mainnet.g.alchemy.com/v2/YOUR_ALCHEMY_API_KEY
+OPTIMISM_RPC_URL=https://opt-mainnet.g.alchemy.com/v2/YOUR_ALCHEMY_API_KEY
+BASE_RPC_URL=https://base-mainnet.g.alchemy.com/v2/YOUR_ALCHEMY_API_KEY
+POLYGON_RPC_URL=https://polygon-mainnet.g.alchemy.com/v2/YOUR_ALCHEMY_API_KEY
+ROOTSTOCK_RPC_URL=https://public-node.rsk.co
+EXECUTOR_PRIVATE_KEY=0xYourExecutorWalletPrivateKeyHere

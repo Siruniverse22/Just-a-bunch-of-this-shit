@@ -1,0 +1,164 @@
+package com.example.paymentapp;
+
+import android.content.Intent;
+import android.os.Bundle;
+import android.util.Log;
+import android.widget.Button;
+import android.widget.TextView;
+import android.widget.Toast;
+import androidx.appcompat.app.AppCompatActivity;
+import com.google.android.gms.tasks.Task;
+import com.google.android.gms.wallet.AutoResolveHelper;
+import com.google.android.gms.wallet.PaymentData;
+import com.google.android.gms.wallet.PaymentDataRequest;
+import com.google.android.gms.wallet.PaymentsClient;
+import com.google.android.gms.wallet.Wallet;
+import com.google.android.gms.wallet.WalletConstants;
+import org.json.JSONException;
+import org.json.JSONObject;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+public class MainActivity extends AppCompatActivity {
+    private static final int LOAD_PAYMENT_DATA_REQUEST_CODE = 991;
+    private PaymentsClient paymentsClient;
+    private TextView statusText;
+    private Button payButton;
+    private ExecutorService executor = Executors.newSingleThreadExecutor();
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+
+        statusText = findViewById(R.id.status_text);
+        payButton = findViewById(R.id.pay_button);
+
+        // Initialize Google Pay API
+        paymentsClient = Wallet.getPaymentsClient(
+                this,
+                new Wallet.WalletOptions.Builder()
+                        .setEnvironment(WalletConstants.ENVIRONMENT_TEST)
+                        .build()
+        );
+
+        payButton.setOnClickListener(v -> initiatePayment());
+    }
+
+    private void initiatePayment() {
+        // Create PaymentDataRequest for Google Pay
+        PaymentDataRequest request = createPaymentDataRequest();
+        Task<PaymentData> paymentDataTask = paymentsClient.loadPaymentData(request);
+        AutoResolveHelper.resolveTask(paymentDataTask, this, LOAD_PAYMENT_DATA_REQUEST_CODE);
+    }
+
+    private PaymentDataRequest createPaymentDataRequest() {
+        JSONObject paymentDataRequestJson = new JSONObject();
+        try {
+            paymentDataRequestJson.put("apiVersion", 2);
+            paymentDataRequestJson.put("apiVersionMinor", 0);
+            JSONObject allowedPaymentMethods = new JSONObject();
+            JSONObject cardParameters = new JSONObject();
+            cardParameters.put("allowedAuthMethods", new JSONArray()
+                    .put("PAN_ONLY")
+                    .put("CRYPTOGRAM_3DS"));
+            cardParameters.put("allowedCardNetworks", new JSONArray()
+                    .put("AMEX")
+                    .put("DISCOVER")
+                    .put("MASTERCARD")
+                    .put("VISA"));
+            JSONObject cardPaymentMethod = new JSONObject();
+            cardPaymentMethod.put("type", "CARD");
+            cardPaymentMethod.put("parameters", cardParameters);
+            cardPaymentMethod.put("tokenizationSpecification", new JSONObject()
+                    .put("type", "PAYMENT_GATEWAY")
+                    .put("parameters", new JSONObject()
+                            .put("gateway", "example")
+                            .put("gatewayMerchantId", "exampleGatewayMerchantId")));
+            allowedPaymentMethods.put("allowedPaymentMethods", new JSONArray().put(cardPaymentMethod));
+            paymentDataRequestJson.put("allowedPaymentMethods", allowedPaymentMethods.getJSONArray("allowedPaymentMethods"));
+            paymentDataRequestJson.put("transactionInfo", new JSONObject()
+                    .put("totalPriceStatus", "FINAL")
+                    .put("totalPrice", "10.00")
+                    .put("currencyCode", "USD"));
+            paymentDataRequestJson.put("merchantInfo", new JSONObject()
+                    .put("merchantId", "YOUR_MERCHANT_ID")
+                    .put("merchantName", "Example Merchant"));
+        } catch (JSONException e) {
+            e.printStackTrace();
+        }
+        return PaymentDataRequest.fromJson(paymentDataRequestJson.toString());
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == LOAD_PAYMENT_DATA_REQUEST_CODE) {
+            switch (resultCode) {
+                case RESULT_OK:
+                    PaymentData paymentData = PaymentData.getFromIntent(data);
+                    if (paymentData != null) {
+                        handlePaymentSuccess(paymentData);
+                    }
+                    break;
+                case RESULT_CANCELED:
+                    statusText.setText("Payment canceled");
+                    break;
+                case AutoResolveHelper.RESULT_ERROR:
+                    statusText.setText("Payment error");
+                    break;
+            }
+        }
+    }
+
+    private void handlePaymentSuccess(PaymentData paymentData) {
+        String paymentInfo = paymentData.toJson();
+        executor.execute(() -> {
+            try {
+                String response = sendToBackend(paymentInfo);
+                runOnUiThread(() -> {
+                    statusText.setText(response);
+                    Toast.makeText(this, "Transaction processed", Toast.LENGTH_SHORT).show();
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> statusText.setText("Error: " + e.getMessage()));
+            }
+        });
+    }
+
+    private String sendToBackend(String paymentInfo) throws Exception {
+        URL url = new URL("http://YOUR_SERVER_IP:3000/process-payment");
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+        conn.setRequestMethod("POST");
+        conn.setRequestProperty("Content-Type", "application/json");
+        conn.setDoOutput(true);
+
+        String jsonInputString = new JSONObject()
+                .put("paymentData", paymentInfo)
+                .toString();
+
+        try (OutputStream os = conn.getOutputStream()) {
+            byte[] input = jsonInputString.getBytes("utf-8");
+            os.write(input, 0, input.length);
+        }
+
+        int responseCode = conn.getResponseCode();
+        if (responseCode == HttpURLConnection.HTTP_OK) {
+            BufferedReader in = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+            StringBuilder response = new StringBuilder();
+            String line;
+            while ((line = in.readLine()) != null) {
+                response.append(line);
+            }
+            in.close();
+            return response.toString();
+        } else {
+            throw new RuntimeException("Failed : HTTP error code : " + responseCode);
+        }
+    }
+}

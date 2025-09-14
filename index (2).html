@@ -1,0 +1,204 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Flash Loan App</title>
+  <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.4.0/dist/axios.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    function App() {
+      const [tab, setTab] = useState('user');
+      const [opportunities, setOpportunities] = useState([]);
+      const [filter, setFilter] = useState('all');
+      const [networkActive, setNetworkActive] = useState(false);
+      const [aiMessage, setAiMessage] = useState('');
+      const [aiResponse, setAiResponse] = useState('');
+      const [userConfig, setUserConfig] = useState({
+        externalWallet: '',
+        preferredNetworks: ['ethereum', 'arbitrum', 'optimism', 'base', 'polygon', 'rootstock'],
+        profitWalletBalance: 0,
+      });
+
+      useEffect(() => {
+        axios.get('http://localhost:3001/opportunities', { params: { filter } })
+          .then(res => setOpportunities(res.data));
+      }, [filter]);
+
+      const toggleNetwork = () => {
+        axios.post('http://localhost:3001/toggle-network', { active: !networkActive })
+          .then(res => setNetworkActive(res.data.status === 'Active'));
+      };
+
+      const transferProfit = () => {
+        axios.post('http://localhost:3001/transfer-profit', {
+          token: '0x...',
+          amount: userConfig.profitWalletBalance,
+          to: userConfig.externalWallet,
+        }).then(res => alert('Profit transferred: ' + res.data.txHash));
+      };
+
+      const executeFlashLoan = (opp) => {
+        if (!networkActive) {
+          alert('Network is inactive');
+          return;
+        }
+        axios.post('http://localhost:3001/execute', {
+          chain: opp.chain,
+          contract: opp.executor_contract,
+          params: opp.payload_hex,
+        }).then(res => alert('Flash loan executed: ' + res.data.txHash));
+      };
+
+      const sendAiMessage = () => {
+        axios.post('http://localhost:3001/ai-chat', { message: aiMessage })
+          .then(res => setAiResponse(res.data.response));
+      };
+
+      return (
+        <div className="max-w-4xl mx-auto p-4">
+          <h1 className="text-2xl font-bold mb-4">Flash Loan App</h1>
+          <div className="flex space-x-4 mb-4">
+            <button className="px-4 py-2 bg-blue-500 text-white rounded" onClick={() => setTab('user')}>User</button>
+            <button className="px-4 py-2 bg-blue-500 text-white rounded" onClick={() => setTab('catalog')}>Catalog</button>
+            <button className="px-4 py-2 bg-blue-500 text-white rounded" onClick={() => setTab('ai')}>AI Chat</button>
+            <button className="px-4 py-2 bg-green-500 text-white rounded" onClick={toggleNetwork}>
+              Network: {networkActive ? 'Active' : 'Inactive'}
+            </button>
+          </div>
+
+          {tab === 'user' && (
+            <div>
+              <h2 className="text-xl font-semibold mb-2">User Configuration</h2>
+              <input
+                type="text"
+                className="border p-2 w-full mb-2"
+                placeholder="External Wallet Address"
+                value={userConfig.externalWallet}
+                onChange={e => setUserConfig({ ...userConfig, externalWallet: e.target.value })}
+              />
+              <div className="mb-2">
+                <h3 className="font-semibold">Preferred Networks</h3>
+                {['ethereum', 'arbitrum', 'optimism', 'base', 'polygon', 'rootstock'].map(network => (
+                  <label key={network} className="block">
+                    <input
+                      type="checkbox"
+                      checked={userConfig.preferredNetworks.includes(network)}
+                      onChange={() => {
+                        const newNetworks = userConfig.preferredNetworks.includes(network)
+                          ? userConfig.preferredNetworks.filter(n => n !== network)
+                          : [...userConfig.preferredNetworks, network];
+                        setUserConfig({ ...userConfig, preferredNetworks: newNetworks });
+                      }}
+                    />
+                    {network}
+                  </label>
+                ))}
+              </div>
+              <p>Profit Wallet Balance: {userConfig.profitWalletBalance} ETH</p>
+              <button className="px-4 py-2 bg-blue-500 text-white rounded" onClick={transferProfit}>
+                Transfer Profit
+              </button>
+            </div>
+          )}
+
+          {tab === 'catalog' && (
+            <div>
+              <h2 className="text-xl font-semibold mb-2">Flash Loan Catalog</h2>
+              <select
+                className="border p-2 mb-2"
+                value={filter}
+                onChange={e => setFilter(e.target.value)}
+              >
+                <option value="all">All</option>
+                <option value="zero_cost">Zero Cost</option>
+                <option value="profit_high">Profit: High to Low</option>
+              </select>
+              <div className="space-y-4">
+                {opportunities.map(opp => (
+                  <div key={opp.id} className="border p-4 rounded">
+                    <p>Protocol: {opp.protocol}</p>
+                    <p>Chain: {opp.chain_id}</p>
+                    <p>Expected Profit: {opp.expected_profit_wei} wei</p>
+                    <p>Gas: {opp.gas_wei} wei</p>
+                    <p>Flash Fee: {opp.flash_fee_wei} wei</p>
+                    <button
+                      className="px-4 py-2 bg-green-500 text-white rounded"
+                      onClick={() => executeFlashLoan(opp)}
+                    >
+                      Execute
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {tab === 'ai' && (
+            <div>
+              <h2 className="text-xl font-semibold mb-2">AI Chat</h2>
+              <textarea
+                className="border p-2 w-full mb-2"
+                placeholder="Ask the AI about flash loans, errors, or features"
+                value={aiMessage}
+                onChange={e => setAiMessage(e.target.value)}
+              />
+              <button className="px-4 py-2 bg-blue-500 text-white rounded" onClick={sendAiMessage}>
+                Send
+              </button>
+              <p className="mt-2">{aiResponse}</p>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.render(<App />, document.getElementById('root'));
+  </script>
+</body>
+</html>
